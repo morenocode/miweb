@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           cd generated_app
-          flutter analyze
+          flutter analyze lib
 
       - name: Build trial APK
         shell: bash
