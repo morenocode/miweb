@@ -48,7 +48,7 @@ jobs:
           cd generated_app
           flutter pub get
 
-      - name: Create custom icon
+      - name: Create Moti app icon
         shell: bash
         run: |
           python3 -m pip install --quiet pillow
@@ -57,12 +57,16 @@ jobs:
           from PIL import Image, ImageDraw
           root = Path('generated_app/android/app/src/main/res')
           sizes = {'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
-          img = Image.new('RGB', (1024,1024), (108,99,232))
+          img = Image.new('RGB', (1024,1024), (120,103,232))
           d = ImageDraw.Draw(img)
-          d.ellipse((185,185,839,839), fill=(255,255,255))
-          d.ellipse((360,390,430,460), fill=(108,99,232))
-          d.ellipse((594,390,664,460), fill=(108,99,232))
-          d.arc((350,430,675,700), 15, 165, fill=(108,99,232), width=42)
+          d.rounded_rectangle((215,250,809,845), radius=235, fill=(146,127,239))
+          d.ellipse((342,465,406,529), fill=(48,40,70))
+          d.ellipse((618,465,682,529), fill=(48,40,70))
+          d.arc((390,500,650,715), 15, 165, fill=(48,40,70), width=34)
+          d.ellipse((280,565,370,620), fill=(255,170,188))
+          d.ellipse((654,565,744,620), fill=(255,170,188))
+          d.ellipse((470,110,690,355), fill=(102,200,135))
+          d.line((515,330,590,185), fill=(62,160,101), width=28)
           for folder, size in sizes.items():
               p = root / folder
               p.mkdir(parents=True, exist_ok=True)
@@ -71,36 +75,30 @@ jobs:
               icon.save(p/'ic_launcher_round.png')
           PY
 
-      - name: Build installable APK
+      - name: Analyze Flutter code
+        shell: bash
+        run: |
+          cd generated_app
+          flutter analyze
+
+      - name: Build trial APK
         shell: bash
         run: |
           cd generated_app
           flutter build apk --release
 
-      - name: Build unsigned AAB
-        shell: bash
-        run: |
-          cd generated_app
-          sed -i '/signingConfig = signingConfigs.getByName("debug")/d' android/app/build.gradle.kts
-          flutter clean
-          flutter pub get
-          flutter build appbundle --release
-
-      - name: Collect files
+      - name: Collect APK and source
         shell: bash
         run: |
           mkdir -p dist
-          cp generated_app/build/app/outputs/bundle/release/app-release.aab dist/Animo-Hoy-v1.0.0-unsigned.aab
-          cd generated_app
-          sed -i '/release {/a\            signingConfig = signingConfigs.getByName("debug")' android/app/build.gradle.kts
-          flutter build apk --release
-          cd ..
-          cp generated_app/build/app/outputs/flutter-apk/app-release.apk dist/Animo-Hoy-v1.0.0.apk
+          cp generated_app/build/app/outputs/flutter-apk/app-release.apk dist/Animo-Hoy-Moti-v2.0.0-PRUEBA.apk
+          cp animo-hoy-source/lib/main.dart dist/main.dart
+          cp animo-hoy-source/pubspec.yaml dist/pubspec.yaml
 
       - name: Upload build files
         uses: actions/upload-artifact@v4
         with:
-          name: animo-hoy-build
+          name: animo-hoy-moti-v2
           path: dist/*
           if-no-files-found: error
           retention-days: 7
