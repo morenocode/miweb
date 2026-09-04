@@ -1,0 +1,210 @@
+name: Build Animo Hoy v3.4 Android
+
+on:
+  push:
+    branches:
+      - build-animo-hoy-v34-20260904
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Install Android API 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Create Flutter project and apply v3.4
+        run: |
+          rm -rf generated_app
+          flutter create --platforms=android --org com.modu --project-name animohoy generated_app
+          cp animo-hoy-source/pubspec.yaml generated_app/pubspec.yaml
+          cp animo-hoy-source/lib/main.dart generated_app/lib/main.dart
+          cp animo-hoy-source/lib/dynamic_missions.dart generated_app/lib/dynamic_missions.dart
+          cp animo-hoy-source/lib/moti_minute.dart generated_app/lib/moti_minute.dart
+          cp animo-hoy-source/lib/moti_bubbles_game.dart generated_app/lib/moti_bubbles_game.dart
+          sed -i 's/version: 3.0.0+3/version: 3.4.0+7/' generated_app/pubspec.yaml
+          python3 tools/patch_v31.py generated_app/lib/main.dart
+          python3 tools/patch_v32.py generated_app/lib/main.dart
+          python3 tools/patch_v33.py generated_app/lib/main.dart
+          python3 tools/patch_v34.py generated_app/lib/main.dart
+          python3 tools/patch_moti_expressive.py generated_app/lib/moti_minute.dart
+          sed -i 's/android:label="animohoy"/android:label="Ánimo Hoy"/' generated_app/android/app/src/main/AndroidManifest.xml
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' generated_app/android/app/build.gradle.kts
+          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' generated_app/android/app/build.gradle.kts
+
+      - name: Generate original app sounds
+        run: |
+          mkdir -p generated_app/assets/sounds
+          python3 <<'PY'
+          import math, os, random, struct, wave
+          SR=44100; root='generated_app/assets/sounds'
+          def write(name, samples):
+              with wave.open(os.path.join(root,name),'wb') as w:
+                  w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR); w.writeframes(b''.join(samples))
+          def tone(name, notes, dur=.6, vol=.16):
+              out=[]; total=int(SR*dur); seg=max(1,total//len(notes))
+              for i in range(total):
+                  f=notes[min(len(notes)-1,i//seg)]; local=(i%seg)/seg
+                  env=min(1,local/.08,(1-local)/.18); t=i/SR
+                  v=math.sin(2*math.pi*f*t)+.25*math.sin(4*math.pi*f*t)
+                  out.append(struct.pack('<h',int(32767*vol*max(0,env)*v/1.25)))
+              write(name,out)
+          tone('feliz.wav',[659,784,988],.58,.22)
+          tone('tranquilo.wav',[392,523,659],.72,.15)
+          tone('normal.wav',[440,554],.48,.16)
+          tone('triste.wav',[440,392,330],.78,.12)
+          tone('ansioso.wav',[494,466,440],.62,.11)
+          tone('cansado.wav',[349,294],.82,.10)
+          tone('enojado.wav',[392,370,349],.45,.15)
+          total=int(SR*12); out=[]
+          for i in range(total):
+              t=i/SR; phase=t%6; env=.5-.5*math.cos(2*math.pi*phase/6)
+              sample=math.sin(2*math.pi*220*t)+.35*math.sin(2*math.pi*330*t)
+              out.append(struct.pack('<h',int(32767*.035*env*sample/1.35)))
+          write('respirar.wav',out)
+          dur=.78; total=int(SR*dur); out=[]
+          bursts=[(.03,.15,430,690),(.19,.32,470,760),(.37,.51,510,820),(.56,.72,550,900)]
+          for i in range(total):
+              t=i/SR; value=0.0
+              for start,end,f0,f1 in bursts:
+                  if start <= t <= end:
+                      local=(t-start)/(end-start); env=math.sin(math.pi*local)**1.3
+                      f=f0+(f1-f0)*local; wob=1+.035*math.sin(2*math.pi*13*t)
+                      phase=2*math.pi*f*t*wob
+                      value += env*(math.sin(phase)+.28*math.sin(phase*2.03))
+              out.append(struct.pack('<h',int(max(-1,min(1,value*.16))*32767)))
+          write('moti_risa.wav',out)
+          # Pop de burbuja: clic redondo con caída rápida y un toque de ruido.
+          total=int(SR*.18); out=[]; rng=random.Random(34)
+          for i in range(total):
+              t=i/SR; x=t/.18; env=(1-x)**3
+              f=760-430*x
+              v=.72*math.sin(2*math.pi*f*t)+.28*(rng.random()*2-1)
+              out.append(struct.pack('<h',int(32767*.18*env*v)))
+          write('burbuja_pop.wav',out)
+          tone('moti_salto.wav',[523,659,880],.23,.18)
+          tone('moti_meta.wav',[523,659,784,1047],.72,.22)
+          tone('moti_fin.wav',[440,392],.38,.10)
+          PY
+
+      - name: Create Moti icon
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+          root=Path('generated_app/android/app/src/main/res')
+          sizes={'mipmap-mdpi':48,'mipmap-hdpi':72,'mipmap-xhdpi':96,'mipmap-xxhdpi':144,'mipmap-xxxhdpi':192}
+          img=Image.new('RGB',(1024,1024),(255,239,232)); d=ImageDraw.Draw(img)
+          d.rounded_rectangle((190,230,834,865),radius=250,fill=(240,68,50))
+          d.ellipse((330,455,400,525),fill=(255,255,255)); d.ellipse((624,455,694,525),fill=(255,255,255))
+          d.ellipse((350,470,385,510),fill=(61,39,34)); d.ellipse((644,470,679,510),fill=(61,39,34))
+          d.ellipse((380,565,650,735),fill=(201,47,34)); d.rounded_rectangle((420,585,610,625),radius=12,fill=(255,255,255)); d.ellipse((455,670,575,720),fill=(255,130,151))
+          d.ellipse((485,100,720,340),fill=(69,168,93)); d.line((535,335,595,175),fill=(49,133,74),width=28)
+          for folder,size in sizes.items():
+              p=root/folder; p.mkdir(parents=True,exist_ok=True); icon=img.resize((size,size),Image.Resampling.LANCZOS)
+              icon.save(p/'ic_launcher.png'); icon.save(p/'ic_launcher_round.png')
+          PY
+
+      - name: Add home-screen widget
+        run: |
+          mkdir -p generated_app/android/app/src/main/res/{layout,xml,drawable}
+          mkdir -p generated_app/android/app/src/main/kotlin/com/modu/animohoy
+          cat > generated_app/android/app/src/main/res/drawable/moti_widget_bg.xml <<'XML'
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle"><solid android:color="#FFF0EA"/><corners android:radius="24dp"/><padding android:left="14dp" android:top="12dp" android:right="14dp" android:bottom="12dp"/></shape>
+          XML
+          cat > generated_app/android/app/src/main/res/layout/moti_widget.xml <<'XML'
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/moti_widget_bg" android:padding="12dp">
+            <ImageView android:layout_width="62dp" android:layout_height="62dp" android:src="@mipmap/ic_launcher" android:contentDescription="Moti"/>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical" android:paddingStart="12dp">
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Ánimo Hoy" android:textColor="#3D2722" android:textStyle="bold" android:textSize="16sp"/>
+              <TextView android:id="@+id/widget_phrase" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="¿Cómo te sientes hoy?" android:textColor="#725D56" android:textSize="13sp" android:maxLines="2"/>
+              <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="Toca para abrir con Moti →" android:textColor="#C92F22" android:textStyle="bold" android:textSize="11sp"/>
+            </LinearLayout>
+          </LinearLayout>
+          XML
+          cat > generated_app/android/app/src/main/res/xml/moti_widget_info.xml <<'XML'
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android" android:minWidth="220dp" android:minHeight="90dp" android:updatePeriodMillis="1800000" android:initialLayout="@layout/moti_widget" android:resizeMode="horizontal|vertical" android:widgetCategory="home_screen"/>
+          XML
+          cat > generated_app/android/app/src/main/kotlin/com/modu/animohoy/MotiWidget.kt <<'KOTLIN'
+          package com.modu.animohoy
+          import android.app.PendingIntent
+          import android.appwidget.AppWidgetManager
+          import android.appwidget.AppWidgetProvider
+          import android.content.Context
+          import android.widget.RemoteViews
+          import java.util.Calendar
+          class MotiWidget : AppWidgetProvider() {
+            override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
+              val phrases=arrayOf("¿Cómo te sientes hoy?","Un paso pequeño también cuenta.","Moti está aquí contigo.","¿Jugamos Burbujas de Moti?")
+              val phrase=phrases[Calendar.getInstance().get(Calendar.DAY_OF_YEAR)%phrases.size]
+              for(id in ids){
+                val intent=context.packageManager.getLaunchIntentForPackage(context.packageName)
+                val pending=PendingIntent.getActivity(context,id,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                val views=RemoteViews(context.packageName,R.layout.moti_widget)
+                views.setTextViewText(R.id.widget_phrase,phrase); views.setOnClickPendingIntent(R.id.widget_root,pending); manager.updateAppWidget(id,views)
+              }
+            }
+          }
+          KOTLIN
+          python3 <<'PY'
+          from pathlib import Path
+          p=Path('generated_app/android/app/src/main/AndroidManifest.xml'); s=p.read_text()
+          receiver='''<receiver android:name=".MotiWidget" android:exported="false"><intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter><meta-data android:name="android.appwidget.provider" android:resource="@xml/moti_widget_info"/></receiver>'''
+          p.write_text(s.replace('    </application>',receiver+'    </application>'))
+          PY
+
+      - name: Resolve and analyze
+        run: |
+          cd generated_app
+          flutter pub get
+          flutter analyze lib
+
+      - name: Build trial APK
+        run: |
+          cd generated_app
+          flutter build apk --release
+
+      - name: Collect files
+        run: |
+          mkdir -p dist/source/lib
+          cp generated_app/build/app/outputs/flutter-apk/app-release.apk dist/Animo-Hoy-Moti-v3.4.0-PRUEBA.apk
+          cp generated_app/lib/main.dart dist/source/lib/main.dart
+          cp generated_app/lib/dynamic_missions.dart dist/source/lib/dynamic_missions.dart
+          cp generated_app/lib/moti_minute.dart dist/source/lib/moti_minute.dart
+          cp generated_app/lib/moti_bubbles_game.dart dist/source/lib/moti_bubbles_game.dart
+          cp generated_app/pubspec.yaml dist/source/pubspec.yaml
+          cat > dist/LEEME.txt <<'TXT'
+          Ánimo Hoy v3.4.0 - APK de prueba
+          Moti ahora tiene ojos más expresivos, parpadeo, dientes, lengua y carcajada.
+          Incluye Burbujas de Moti: 60 segundos, operaciones rápidas, cuatro burbujas,
+          diez escalones, dificultad progresiva, salto de Moti y recompensa diaria +10 estrellas.
+          TXT
+
+      - name: Upload build files
+        uses: actions/upload-artifact@v4
+        with:
+          name: animo-hoy-moti-v34
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
