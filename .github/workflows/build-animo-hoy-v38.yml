@@ -48,7 +48,7 @@ jobs:
           python3 tools/patch_bubbles_v35.py generated_app/lib/moti_bubbles_game.dart
           (cd generated_app/lib && patch -p0 < ../../tools/bubbles_v36.patch)
           python3 tools/patch_bubbles_v37.py generated_app/lib/moti_bubbles_game.dart
-          (cd generated_app/lib && patch -p0 < ../../tools/bubbles_v38.patch)
+          python3 tools/apply_bubbles_v38.py generated_app/lib/moti_bubbles_game.dart
           sed -i 's/android:label="animohoy"/android:label="Ánimo Hoy"/' generated_app/android/app/src/main/AndroidManifest.xml
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' generated_app/android/app/build.gradle.kts
           sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' generated_app/android/app/build.gradle.kts
