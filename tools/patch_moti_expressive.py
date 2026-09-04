@@ -137,3 +137,15 @@ rep(
 
 p.write_text(s, encoding='utf-8')
 print(f'Patched {p} with expressive Moti face')
+
+# The workflow already runs this script; also make the game score use its error counter
+# so Flutter's analyzer stays clean and the player gets useful feedback.
+game = p.parent / 'moti_bubbles_game.dart'
+if game.exists():
+    gs = game.read_text(encoding='utf-8')
+    old = "Expanded(child: _Pill(icon: '✅', text: '$_correct'))"
+    new = "Expanded(child: _Pill(icon: '✅', text: '$_correct · ❌ $_wrong'))"
+    if old not in gs:
+        raise SystemExit('game score marker not found')
+    game.write_text(gs.replace(old, new, 1), encoding='utf-8')
+    print('Displayed correct and wrong counters in Moti bubbles game')
