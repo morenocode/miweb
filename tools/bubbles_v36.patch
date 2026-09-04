@@ -1,0 +1,282 @@
+--- moti_bubbles_game.dart
++++ moti_bubbles_game.dart
+@@ -88,6 +88,9 @@
+   bool _won = false;
+   bool _happy = false;
+   bool _surprised = false;
++  bool _falling = false;
++  bool _transitioning = false;
++  bool _gameOver = false;
+   int _answer = 0;
+   String _question = '';
+   List<int> _options = const [];
+@@ -137,16 +140,59 @@
+     }
+   }
+ 
+-  void _damageCurrentStep({bool severe = false}) {
+-    final index = math.min(_step, _goal - 1);
++  Future<void> _breakCurrentStepAndFall({bool timeout = false}) async {
++    if (_transitioning || _finished) return;
++    _transitioning = true;
++    final brokenStep = math.max(0, math.min(_step, _goal - 1));
++
+     setState(() {
+-      final current = _stepDamage[index] ?? 0;
+-      _stepDamage[index] = math.min(3, current + (severe ? 2 : 1));
++      _stepDamage[brokenStep] = 3;
++      _happy = false;
++      _surprised = true;
++      _falling = true;
+     });
+-    if (widget.hapticOn) {
+-      severe ? HapticFeedback.heavyImpact() : HapticFeedback.mediumImpact();
++
++    if (widget.hapticOn) HapticFeedback.heavyImpact();
++    await _playClock('escalon_crack.wav', volume: timeout ? .64 : .54);
++    await Future.delayed(const Duration(milliseconds: 230));
++    if (!mounted || _finished) return;
++
++    if (_step <= 0) {
++      setState(() {
++        _step = -1;
++        _surprised = true;
++      });
++      await _playClock('moti_caida.wav', volume: .58);
++      if (widget.hapticOn) HapticFeedback.heavyImpact();
++      await Future.delayed(const Duration(milliseconds: 680));
++      if (!mounted) return;
++      _timer?.cancel();
++      setState(() {
++        _finished = true;
++        _won = false;
++        _gameOver = true;
++        _falling = false;
++        _transitioning = false;
++      });
++      await _play('moti_fin.wav', volume: .4);
++      return;
+     }
+-    _playClock('escalon_crack.wav', volume: severe ? .56 : .42);
++
++    setState(() {
++      _step = _step - 1;
++    });
++    await _playClock('moti_caida.wav', volume: .48);
++    await Future.delayed(const Duration(milliseconds: 560));
++    if (!mounted || _finished) return;
++
++    setState(() {
++      // El escalón roto cae fuera de pantalla. Al comenzar la siguiente
++      // pregunta se reconstruye para que Moti pueda intentar subir de nuevo.
++      _stepDamage.remove(brokenStep);
++      _falling = false;
++      _transitioning = false;
++    });
++    _newQuestion();
+   }
+ 
+   void _clockWarning() {
+@@ -165,7 +211,8 @@
+     setState(() => _started = true);
+     if (widget.hapticOn) HapticFeedback.selectionClick();
+     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+-      if (!mounted) return;
++      if (!mounted || _finished) return;
++      if (_transitioning) return;
+       if (_remaining <= 1) {
+         _finish();
+         return;
+@@ -176,15 +223,12 @@
+       });
+ 
+       if (_questionRemaining <= 0) {
+-        _damageCurrentStep(severe: true);
+         setState(() {
+           _surprised = true;
+           _happy = false;
+         });
+-        _playClock('reloj_alarma.wav', volume: .62);
+-        Future.delayed(const Duration(milliseconds: 520), () {
+-          if (mounted && !_finished) _newQuestion();
+-        });
++        _playClock('reloj_alarma.wav', volume: .64);
++        _breakCurrentStepAndFall(timeout: true);
+       } else {
+         _clockWarning();
+       }
+@@ -268,7 +312,7 @@
+   }
+ 
+   Future<void> _tapBubble(int index) async {
+-    if (!_started || _finished || _popped.contains(index)) return;
++    if (!_started || _finished || _transitioning || _popped.contains(index)) return;
+     final value = _options[index];
+     setState(() => _popped.add(index));
+     if (widget.hapticOn) HapticFeedback.lightImpact();
+@@ -293,18 +337,13 @@
+         });
+       }
+     } else {
+-      _damageCurrentStep();
+       setState(() {
+         _wrong++;
+         _happy = false;
+         _surprised = true;
+       });
+       if (widget.hapticOn) HapticFeedback.selectionClick();
+-      if (_popped.length >= 3) {
+-        Future.delayed(const Duration(milliseconds: 280), () {
+-          if (mounted && !_finished) _newQuestion();
+-        });
+-      }
++      await _breakCurrentStepAndFall();
+     }
+   }
+ 
+@@ -318,6 +357,8 @@
+       _remaining = math.max(0, _remaining - (won ? 0 : 1));
+       _happy = won;
+       _surprised = !won;
++      _falling = false;
++      _transitioning = false;
+     });
+     if (widget.hapticOn) HapticFeedback.heavyImpact();
+     _play(won ? 'moti_meta.wav' : 'moti_fin.wav', volume: won ? .58 : .35);
+@@ -337,6 +378,9 @@
+       _won = false;
+       _happy = false;
+       _surprised = false;
++      _falling = false;
++      _transitioning = false;
++      _gameOver = false;
+       _stepDamage.clear();
+       _lastAlertSecond = -1;
+     });
+@@ -361,7 +405,7 @@
+                   const SizedBox(width: 8),
+                   Expanded(child: _Pill(icon: '✅', text: '$_correct · ❌ $_wrong')),
+                   const SizedBox(width: 8),
+-                  Expanded(child: _Pill(icon: '🪜', text: '$_step/$_goal')),
++                  Expanded(child: _Pill(icon: '🪜', text: '${math.max(0, _step)}/$_goal')),
+                 ],
+               ),
+               const SizedBox(height: 10),
+@@ -445,6 +489,8 @@
+                             stepDamage: _stepDamage,
+                             nervousLevel: nervousLevel,
+                             shake: shake,
++                            falling: _falling,
++                            gameOver: _gameOver,
+                           );
+                         },
+                       ),
+@@ -481,7 +527,7 @@
+                                         child: _AnswerBubble(
+                                           value: _options[index],
+                                           index: index,
+-                                          enabled: _started && !_finished,
++                                          enabled: _started && !_finished && !_transitioning,
+                                           onTap: () => _tapBubble(index),
+                                         ),
+                                       ),
+@@ -509,7 +555,9 @@
+                 )
+               else if (_finished) ...[
+                 Text(
+-                  _won ? '🏆 ¡Moti llegó a la meta!' : '⏰ Se acabó el minuto. Llegaste al escalón $_step.',
++                  _gameOver
++                      ? '🕳️ ¡Moti cayó al vacío! Game Over'
++                      : (_won ? '🏆 ¡Moti llegó a la meta!' : '⏰ Se acabó el minuto. Llegaste al escalón ${math.max(0, _step)}.'),
+                   textAlign: TextAlign.center,
+                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                 ),
+@@ -527,7 +575,7 @@
+                   ],
+                 ),
+               ] else
+-                const Text('Cada acierto hace saltar a Moti. Las burbujas incorrectas también explotan.', textAlign: TextAlign.center, style: TextStyle(fontSize: 11.8, color: Color(0xFF8B7B76))),
++                Text(_transitioning ? '💥 ¡El escalón se rompió! Moti está cayendo…' : '✅ Acierto: subes.  ❌ Fallo o tiempo: se rompe el escalón y bajas.  🕳️ Desde el primero: Game Over.', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11.8, color: Color(0xFF8B7B76))),
+             ],
+           ),
+         ),
+@@ -647,6 +695,8 @@
+     required this.stepDamage,
+     required this.nervousLevel,
+     required this.shake,
++    required this.falling,
++    required this.gameOver,
+   });
+ 
+   final int step;
+@@ -658,6 +708,8 @@
+   final Map<int, int> stepDamage;
+   final int nervousLevel;
+   final double shake;
++  final bool falling;
++  final bool gameOver;
+ 
+   @override
+   Widget build(BuildContext context) {
+@@ -668,6 +720,21 @@
+         return Stack(
+           clipBehavior: Clip.none,
+           children: [
++            Positioned(
++              left: 8,
++              right: 6,
++              bottom: -6,
++              child: Container(
++                height: 24,
++                decoration: BoxDecoration(
++                  borderRadius: BorderRadius.circular(50),
++                  gradient: const LinearGradient(colors: [Color(0xFF3A2927), Color(0xFF140F0E)]),
++                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: .22), blurRadius: 10, spreadRadius: 1)],
++                ),
++                alignment: Alignment.center,
++                child: const Text('VACÍO', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, letterSpacing: 1.2, color: Colors.white70)),
++              ),
++            ),
+             for (var i = 0; i < goal; i++)
+               Positioned(
+                 left: 5 + i * 4.5,
+@@ -694,19 +761,26 @@
+               child: Column(children: const [Text('⭐', style: TextStyle(fontSize: 25)), Text('META', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: _redDark))]),
+             ),
+             AnimatedPositioned(
+-              duration: const Duration(milliseconds: 360),
+-              curve: Curves.easeOutBack,
+-              left: 12 + step * 3.8,
+-              bottom: 24 + math.min(step, goal - 1) * gap + jump,
+-              child: Transform.translate(
+-                offset: Offset(shake, 0),
+-                child: CustomPaint(
+-                  size: const Size(58, 70),
+-                  painter: _MiniMotiPainter(
+-                    happy: happy || finished,
+-                    surprised: surprised,
+-                    tongue: finished,
+-                    nervousLevel: nervousLevel,
++              duration: Duration(milliseconds: falling ? 560 : 360),
++              curve: falling ? Curves.easeInCubic : Curves.easeOutBack,
++              left: 12 + math.max(0, step) * 3.8,
++              bottom: step < 0 ? -66 : 24 + math.min(step, goal - 1) * gap + jump,
++              child: AnimatedOpacity(
++                duration: const Duration(milliseconds: 260),
++                opacity: gameOver && step < 0 ? .18 : 1,
++                child: Transform.translate(
++                  offset: Offset(shake, 0),
++                  child: Transform.rotate(
++                    angle: falling ? .18 : 0,
++                    child: CustomPaint(
++                      size: const Size(58, 70),
++                      painter: _MiniMotiPainter(
++                        happy: happy || finished,
++                        surprised: surprised,
++                        tongue: finished,
++                        nervousLevel: nervousLevel,
++                      ),
++                    ),
+                   ),
+                 ),
+               ),
