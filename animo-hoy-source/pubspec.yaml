@@ -1,7 +1,7 @@
 name: animohoy
 description: "Ánimo Hoy - Moti, tu compañero de bienestar diario."
 publish_to: 'none'
-version: 4.2.0+15
+version: 4.3.0+16
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
