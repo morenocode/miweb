@@ -30,17 +30,35 @@ jobs:
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Create Flutter project from integrated v4.0 source
+      - name: Create Flutter project and apply v4.0
         run: |
-          rm -rf generated_app source_v40
-          mkdir -p source_v40
-          unzip -q animo-hoy-v40-source.zip -d source_v40
+          set -e
+          rm -rf generated_app
           flutter create --platforms=android --org com.modu --project-name animohoy generated_app
-          cp source_v40/pubspec.yaml generated_app/pubspec.yaml
-          cp source_v40/lib/*.dart generated_app/lib/
+          cp animo-hoy-source/pubspec.yaml generated_app/pubspec.yaml
+          cp animo-hoy-source/lib/main.dart generated_app/lib/main.dart
+          cp animo-hoy-source/lib/dynamic_missions.dart generated_app/lib/dynamic_missions.dart
+          cp animo-hoy-source/lib/moti_minute.dart generated_app/lib/moti_minute.dart
+          cp animo-hoy-source/lib/moti_bubbles_game.dart generated_app/lib/moti_bubbles_game.dart
+          sed -i 's/version: 3.0.0+3/version: 4.0.0+13/' generated_app/pubspec.yaml
+          python3 tools/patch_v31.py generated_app/lib/main.dart
+          python3 tools/patch_v32.py generated_app/lib/main.dart
+          python3 tools/patch_v33.py generated_app/lib/main.dart
+          python3 tools/patch_v34.py generated_app/lib/main.dart
+          python3 tools/patch_moti_expressive.py generated_app/lib/moti_minute.dart
+          python3 tools/patch_bubbles_v35.py generated_app/lib/moti_bubbles_game.dart
+          (cd generated_app/lib && patch -p0 < ../../tools/bubbles_v36.patch)
+          python3 tools/patch_bubbles_v37.py generated_app/lib/moti_bubbles_game.dart
+          python3 tools/apply_bubbles_v38.py generated_app/lib/moti_bubbles_game.dart
+          python3 tools/patch_bubbles_v39.py generated_app/lib/moti_bubbles_game.dart
+          cat tools/bridge_v40.b64.part00 tools/bridge_v40.b64.part01 tools/bridge_v40.b64.part02 tools/bridge_v40.b64.part03 | base64 -d | gzip -d > generated_app/lib/moti_bridge_game.dart
+          test -s generated_app/lib/moti_bridge_game.dart
+          grep -q "class BridgeMathGamePage" generated_app/lib/moti_bridge_game.dart
+          python3 tools/patch_v40.py generated_app/lib/main.dart
           sed -i 's/android:label="animohoy"/android:label="Ánimo Hoy"/' generated_app/android/app/src/main/AndroidManifest.xml
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' generated_app/android/app/build.gradle.kts
           sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 36/' generated_app/android/app/build.gradle.kts
+          echo "Puente source bytes: $(wc -c < generated_app/lib/moti_bridge_game.dart)"
 
       - name: Generate app sounds
         run: |
