@@ -1,5 +1,8 @@
 from pathlib import Path
 import sys
+import base64
+import gzip
+import subprocess
 
 p = Path(sys.argv[1])
 s = p.read_text()
@@ -34,3 +37,12 @@ once(card, card_new, 'bridge card')
 
 p.write_text(s)
 print('v4.0 main integration applied')
+
+# v4.4: patch the known-good v4.3 bridge source after it is decoded.
+patch_file = Path(__file__).with_name('v44_patch.b64')
+bridge_file = p.parent / 'moti_bridge_game.dart'
+patch_bytes = gzip.decompress(base64.b64decode(patch_file.read_text().strip()))
+tmp_patch = Path('/tmp/animo_v44.patch')
+tmp_patch.write_bytes(patch_bytes)
+subprocess.run(['patch', '-p5', '--batch', '--forward', '-i', str(tmp_patch)], cwd=bridge_file.parent, check=True)
+print('v4.4 bridge damage + Moti sizing patch applied')
